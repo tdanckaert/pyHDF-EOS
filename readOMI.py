@@ -9,16 +9,16 @@ class HDFEOS:
 
     def __init__(self, filename):
         self.filename = filename
-        self.file = HDF.HDF(self.filename)
-        self.v=self.file.vgstart()
-        self.vs=self.file.vstart()
-        self.sd=SD.SD(filename)
+        self._file = HDF.HDF(self.filename)
+        self._v=self._file.vgstart()
+        self._vs=self._filevstart()
+        self._sd=SD.SD(filename)
 
         self.swaths = self.listswaths()
 
     def close(self):
-        self.v.end()
-        self.file.close()
+        self._v.end()
+        self._file.close()
 
     def __enter__(self):
         return self
@@ -31,40 +31,40 @@ class HDFEOS:
         ref= -1
         try:
             while True:
-                ref = self.v.getid(ref)
+                ref = self._v.getid(ref)
                 with vgroup(self, ref) as group:
-                    if group.vg._class == 'SWATH':
-                        swaths[group.vg._name] = ref
+                    if group._vg._class == 'SWATH':
+                        swaths[group._vg._name] = ref
         except pyhdf.error.HDF4Error:
             return swaths
 
     def openswath(self,name):
-        return swath(self, self.v.attach(self.swaths[name]))
+        return swath(self, self._v.attach(self.swaths[name]))
 
 class swath:
 
     def __init__(self, file, vg):
-        self.file = file
-        self.vg = vg
-        self.open = True
+        self._file = file
+        self._vg = vg
+        self._open = True
         for tag, ref in vg.tagrefs():
             if tag == HC.HC.DFTAG_VG:
-                group = vgroup(self.file, ref)
-                if group.vg._name == 'Data Fields':
+                group = vgroup(self._file, ref)
+                if group._vg._name == 'Data Fields':
                     self.data = group
-                elif group.vg._name == 'Geolocation Fields':
+                elif group._vg._name == 'Geolocation Fields':
                     self.geolocation = group
-                elif group.vg._name == 'Swath Attributes':
+                elif group._vg._name == 'Swath Attributes':
                     self.attributes = group
                 else: # normally, a HDF-EOS swath should only contain above 3 groups, but let's be safe
                     group.close()
 
     def close(self):
-        if self.open:
+        if self._open:
             self.data.close()
             self.geolocation.close()
             self.attributes.close()
-            self.open = False
+            self._open = False
 
     def __enter__(self):
         return self
@@ -78,14 +78,14 @@ class swath:
 class vdata:
 
     def __init__(self,file, ref):
-        self.vd=file.vs.attach(ref)
-        self.nrecs, self.intmode, self.fields, self.size, self.name = self.vd.inquire()
-        self.open = True
+        self._vd=file._vs.attach(ref)
+        self.nrecs, self.intmode, self.fields, self.size, self.name = self._vd.inquire()
+        self._open = True
 
     def close(self):
-        if self.open:
-            self.vd.detach()
-            self.open = False
+        if self._open:
+            self._vd.detach()
+            self._open = False
 
     def __enter__(self):
         return self
@@ -94,23 +94,31 @@ class vdata:
         self.close()
 
     def __del__(self):
-        print("delete vdata", self.name)
         self.close()
 
-    def read(self, *args):
-        return self.vd.read(*args)
+    def __getitem__(self, indexes):
+        if isinstance(indexes, slice):
+            # python-hdf4 VD objects implement Python slicing, but
+            # ignore the ``stride'' or ``step'' argument, so we handle
+            # that ourselves by getting the slice without stride
+            # first, and slicing it again using the requested stride
+            # (this could be a little wasteful because we retrieve
+            # elements and then throw them away).
+            return self._vd.__getitem__(indexes)[::indexes.step]
+        else:
+            return self._vd.__getitem__(indexes)
 
 class sd:
 
     def __init__(self,file,ref):
-        self.sds=file.sd.select(file.sd.reftoindex(ref))
-        self.name, self.rank, self.dims, self.type, self.nattrs = self.sds.info()
-        self.open = True
+        self._sds=file._sd.select(file._sd.reftoindex(ref))
+        self.name, self.rank, self.dims, self.type, self.nattrs = self._sds.info()
+        self._open = True
 
     def close(self):
-        if self.open:
-            self.sds.endaccess()
-            self.open = False
+        if self._open:
+            self._sds.endaccess()
+            self._open = False
 
     def __enter__(self):
         return self
@@ -119,25 +127,29 @@ class sd:
         self.close()
 
     def __del__(self):
-        print("delete sd", self.name)
         self.close()
 
-    def get(self, *args):
-        return self.sds.get(*args)
+    def __getitem__(self,arg):
+        return self._sds.__getitem__(arg)
 
 class vgroup:
 
     def __init__(self, file, ref):
-        self.file=file
-        self.vg=file.v.attach(ref)
-        self.name=self.vg._name
-        self.contents=None
+        self._file=file
+        self._vg=file._v.attach(ref)
+        self.name=self._vg._name
+        self._contents=None
 
     def close(self):
-        self.vg.detach()
+        self._vg.detach()
 
     def __enter__(self):
         return self
+
+    def items(self):
+        if not self._contents:
+            self._build_index()
+        return self._contents
 
     def __exit__(self, *args):
         self.close()
@@ -149,14 +161,12 @@ class vgroup:
     }
 
     def _build_index(self):
-        self.contents = {}
-        for tag, ref in self.vg.tagrefs():
+        self._contents = {}
+        for tag, ref in self._vg.tagrefs():
             if tag in self.dispatch:
-                with self.dispatch[tag](self.file, ref) as entry:
-                    self.contents[entry.name] = [tag,ref]
+                with self.dispatch[tag](self._file, ref) as entry:
+                    self._contents[entry.name] = [tag,ref]
 
     def __getitem__(self, key):
-        if not self.contents:
-            self._build_index()
-        tag, ref = self.contents[key]
-        return self.dispatch[tag](self.file, ref)
+        tag, ref = self.items()[key]
+        return self.dispatch[tag](self._file, ref)
