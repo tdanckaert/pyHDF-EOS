@@ -9,15 +9,11 @@ import weakref
 def close_refs(set):
     """Remove all elements from a set and call the "close()" method on
 them."""
-    try:
-        while True:
-            # Iterating over the set might be unsafe, because elements
-            # could disappear due to garbage collection.  Therefore we
-            # use repeated pop()'s until a KeyError is thrown:
-            set.pop().close()
-    except KeyError:
-        # the set is now empty.
-        pass
+    while len(set):
+        # Iterating over the set might be unsafe, because elements
+        # could disappear due to garbage collection.  Therefore we
+        # use repeated pop()'s until a KeyError is thrown:
+        set.pop().close()
 
 class HDFEOS:
 
