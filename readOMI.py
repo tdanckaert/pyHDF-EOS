@@ -4,6 +4,20 @@ import pyhdf.SD as SD
 import pyhdf.V as V
 import pyhdf.VS as VS
 import pyhdf.HC as HC
+import weakref
+
+def close_refs(set):
+    """Remove all elements from a set and call the "close()" method on
+them."""
+    try:
+        while True:
+            # Iterating over the set might be unsafe, because elements
+            # could disappear due to garbage collection.  Therefore we
+            # use repeated pop()'s until a KeyError is thrown:
+            set.pop().close()
+    except KeyError:
+        # the set is now empty.
+        pass
 
 class HDFEOS:
 
@@ -11,14 +25,20 @@ class HDFEOS:
         self.filename = filename
         self._file = HDF.HDF(self.filename)
         self._v=self._file.vgstart()
-        self._vs=self._filevstart()
+        self._vs=self._file.vstart()
         self._sd=SD.SD(filename)
-
+        self._open=True
+        self._swathrefs=weakref.WeakSet() # Weak references to opened swaths
         self.swaths = self.listswaths()
 
     def close(self):
-        self._v.end()
-        self._file.close()
+        if self._open:
+            close_refs(self._swathrefs)
+            self._v.end()
+            self._vs.vend()
+            self._sd.end()
+            self._file.close()
+            self._open=False
 
     def __enter__(self):
         return self
@@ -39,7 +59,9 @@ class HDFEOS:
             return swaths
 
     def openswath(self,name):
-        return swath(self, self._v.attach(self.swaths[name]))
+        s=swath(self, self._v.attach(self.swaths[name]))
+        self._swathrefs.add(s)
+        return s
 
 class swath:
 
@@ -137,11 +159,16 @@ class vgroup:
     def __init__(self, file, ref):
         self._file=file
         self._vg=file._v.attach(ref)
+        self._open=True
         self.name=self._vg._name
         self._contents=None
+        self._itemrefs=weakref.WeakSet() # Weak references to opened items.
 
     def close(self):
-        self._vg.detach()
+        if self._open:
+            close_refs(self._itemrefs)
+            self._vg.detach()
+            self._open=False
 
     def __enter__(self):
         return self
@@ -169,4 +196,6 @@ class vgroup:
 
     def __getitem__(self, key):
         tag, ref = self.items()[key]
-        return self.dispatch[tag](self._file, ref)
+        item=self.dispatch[tag](self._file, ref)
+        self._itemrefs.add(item)
+        return item
