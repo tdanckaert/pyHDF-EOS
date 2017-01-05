@@ -62,12 +62,10 @@ class HDFEOS:
 class swath:
 
     def __init__(self, file, vg):
-        self._file = file
-        self._vg = vg
         self._open = True
         for tag, ref in vg.tagrefs():
             if tag == HC.HC.DFTAG_VG:
-                group = vgroup(self._file, ref)
+                group = vgroup(file, ref)
                 if group._vg._name == 'Data Fields':
                     self.data = group
                 elif group._vg._name == 'Geolocation Fields':
@@ -157,8 +155,16 @@ class vgroup:
         self._vg=file._v.attach(ref)
         self._open=True
         self.name=self._vg._name
-        self._contents=None
+        self._tagrefdict=None
         self._itemrefs=weakref.WeakSet() # Weak references to opened items.
+
+    # The different types of objects are indentified by their tags =>
+    # look up correct constructor depending on the tag:
+    dispatch = {
+        HC.HC.DFTAG_VH : vdata,
+        HC.HC.DFTAG_NDG : sd,
+        HC.HC.DFTAG_VG : __init__
+    }
 
     def close(self):
         if self._open:
@@ -169,29 +175,23 @@ class vgroup:
     def __enter__(self):
         return self
 
-    def items(self):
-        if not self._contents:
-            self._build_index()
-        return self._contents
+    def _tagrefs(self):
+        if not self._tagrefdict:
+            self._tagrefdict = {}
+            for tag, ref in self._vg.tagrefs():
+                if tag in self.dispatch: # we only care for vdata, sd or vgroup objects
+                    with self.dispatch[tag](self._file, ref) as entry:
+                        self._tagrefdict[entry.name] = [tag,ref]
+        return self._tagrefdict
+
+    def content(self):
+        return self._tagrefs().keys()
 
     def __exit__(self, *args):
         self.close()
 
-    dispatch = {
-        HC.HC.DFTAG_VH : vdata,
-        HC.HC.DFTAG_NDG : sd,
-        HC.HC.DFTAG_VG : __init__
-    }
-
-    def _build_index(self):
-        self._contents = {}
-        for tag, ref in self._vg.tagrefs():
-            if tag in self.dispatch:
-                with self.dispatch[tag](self._file, ref) as entry:
-                    self._contents[entry.name] = [tag,ref]
-
     def __getitem__(self, key):
-        tag, ref = self.items()[key]
+        tag, ref = self._tagrefs()[key]
         item=self.dispatch[tag](self._file, ref)
         self._itemrefs.add(item)
         return item
