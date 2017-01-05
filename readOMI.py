@@ -25,7 +25,16 @@ class HDFEOS:
         self._sd=SD.SD(filename)
         self._open=True
         self._swathrefs=weakref.WeakSet() # Weak references to opened swaths
-        self.swaths = self.listswaths()
+        self._swathdict = {}
+        ref= -1
+        try:
+            while True:
+                ref = self._v.getid(ref)
+                with vgroup(self, ref) as group:
+                    if group._vg._class == 'SWATH':
+                        self._swathdict[group._vg._name] = ref
+        except pyhdf.error.HDF4Error:
+            pass
 
     def close(self):
         if self._open:
@@ -42,20 +51,11 @@ class HDFEOS:
     def __exit__(self, *args):
         self.close()
 
-    def listswaths(self):
-        swaths = {}
-        ref= -1
-        try:
-            while True:
-                ref = self._v.getid(ref)
-                with vgroup(self, ref) as group:
-                    if group._vg._class == 'SWATH':
-                        swaths[group._vg._name] = ref
-        except pyhdf.error.HDF4Error:
-            return swaths
+    def swaths(self):
+        return self._swathdict.keys()
 
-    def openswath(self,name):
-        s=swath(self, self._v.attach(self.swaths[name]))
+    def __getitem__(self,name):
+        s=swath(self, self._v.attach(self._swathdict[name]))
         self._swathrefs.add(s)
         return s
 
