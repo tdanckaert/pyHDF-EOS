@@ -37,7 +37,13 @@ class HDFEOS:
             pass
 
     def close(self):
-        if self._open:
+      """
+      @brief Close the file.  Any swaths, variables or groups from this file will be closed as well.
+      :param self: p_self:...
+      :type self: t_self:HDFEOS
+      :returns: r:...
+      """
+      if self._open:
             close_refs(self._swathrefs)
             self._v.end()
             self._vs.vend()
@@ -52,7 +58,13 @@ class HDFEOS:
         self.close()
 
     def swaths(self):
-        return self._swathdict.keys()
+      """
+      @brief Get the set of the names of all swaths in this file.
+      :param self: p_self:...
+      :type self: t_self:HDFEOS
+      :returns: r:...
+      """
+      return self._swathdict.keys()
 
     def __getitem__(self,name):
         s=swath(self, self._v.attach(self._swathdict[name]))
@@ -60,6 +72,13 @@ class HDFEOS:
         return s
 
 class swath:
+    """A HDFEOS swath.
+
+    Attributes:
+    data: the vgroup 'Data Fields'
+    geolocation: the vgroup 'Geolocation Fields'
+    attributes: the vgroup 'Swath Attributes'
+    """
 
     def __init__(self, file, vg):
         self._open = True
@@ -76,6 +95,12 @@ class swath:
                     group.close()
 
     def close(self):
+        """
+        @brief Close the swath.  Variables created from this swath can not be accessed anymore after closing the swath.
+        :param self: p_self:...
+        :type self: t_self:swath
+        :returns: r:...
+        """
         if self._open:
             self.data.close()
             self.geolocation.close()
@@ -177,6 +202,7 @@ class vgroup:
 
     def _tagrefs(self):
         if not self._tagrefdict:
+            # lazily build _tagrefdict:
             self._tagrefdict = {}
             for tag, ref in self._vg.tagrefs():
                 if tag in self.dispatch: # we only care for vdata, sd or vgroup objects
@@ -185,6 +211,12 @@ class vgroup:
         return self._tagrefdict
 
     def content(self):
+        """
+        @brief Get a set (dict.keys()) with the names of all variables or subgroups in this group.
+        :param self: p_self:...
+        :type self: t_self:vgroup
+        :returns: r:...
+        """
         return self._tagrefs().keys()
 
     def __exit__(self, *args):
