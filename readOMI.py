@@ -30,8 +30,8 @@ class HDFEOS:
         try:
             while True:
                 ref = self._v.getid(ref)
-                with vgroup(self, ref) as group:
-                    if group._vg._class == 'SWATH':
+                with vgroup(self, ref, self) as group:
+                    if group._vg._class in ['SWATH', 'GRID']:
                         self._swathdict[group._vg._name] = ref
         except pyhdf.error.HDF4Error:
             pass
@@ -82,14 +82,17 @@ class swath:
 
     def __init__(self, file, vg):
         self._open = True
+        self.data = None
+        self.geolocation = None
+        self.attributes = None
         for tag, ref in vg.tagrefs():
             if tag == HC.HC.DFTAG_VG:
-                group = vgroup(file, ref)
+                group = vgroup(file, ref, self)
                 if group._vg._name == 'Data Fields':
                     self.data = group
                 elif group._vg._name == 'Geolocation Fields':
                     self.geolocation = group
-                elif group._vg._name == 'Swath Attributes':
+                elif group._vg._name in ['Swath Attributes', 'Grid Attributes']:
                     self.attributes = group
                 else: # normally, a HDF-EOS swath should only contain above 3 groups, but let's be safe
                     group.close()
@@ -103,7 +106,8 @@ class swath:
         """
         if self._open:
             self.data.close()
-            self.geolocation.close()
+            if self.geolocation:
+                self.geolocation.close()
             self.attributes.close()
             self._open = False
 
@@ -118,9 +122,10 @@ class swath:
 
 class vdata:
 
-    def __init__(self,file, ref):
+    def __init__(self, file, ref, parent):
         self._vd=file._vs.attach(ref)
         self.nrecs, self.intmode, self.fields, self.size, self.name = self._vd.inquire()
+        self._parent = parent
         self._open = True
 
     def close(self):
@@ -151,9 +156,10 @@ class vdata:
 
 class sd:
 
-    def __init__(self,file,ref):
+    def __init__(self, file, ref, parent):
         self._sds=file._sd.select(file._sd.reftoindex(ref))
         self.name, self.rank, self.dims, self.type, self.nattrs = self._sds.info()
+        self._parent = parent
         self._open = True
 
     def close(self):
@@ -175,10 +181,11 @@ class sd:
 
 class vgroup:
 
-    def __init__(self, file, ref):
+    def __init__(self, file, ref, parent):
         self._file=file
         self._vg=file._v.attach(ref)
         self._open=True
+        self._parent = parent
         self.name=self._vg._name
         self._tagrefdict=None
         self._itemrefs=weakref.WeakSet() # Weak references to opened items.
@@ -206,7 +213,7 @@ class vgroup:
             self._tagrefdict = {}
             for tag, ref in self._vg.tagrefs():
                 if tag in self.dispatch: # we only care for vdata, sd or vgroup objects
-                    with self.dispatch[tag](self._file, ref) as entry:
+                    with self.dispatch[tag](self._file, ref, self) as entry:
                         self._tagrefdict[entry.name] = [tag,ref]
         return self._tagrefdict
 
@@ -224,6 +231,6 @@ class vgroup:
 
     def __getitem__(self, key):
         tag, ref = self._tagrefs()[key]
-        item=self.dispatch[tag](self._file, ref)
+        item=self.dispatch[tag](self._file, ref, self)
         self._itemrefs.add(item)
         return item
